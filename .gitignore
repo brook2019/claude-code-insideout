@@ -1,0 +1,44 @@
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules
+bun.lockb
+
+# API Keys and Secrets
+*.key
+*.pem
+*.p12
+*.crt
+*secret*
+*password*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Claude Code user data
+.claude/memory/
+.claude/cache/
+.claude/settings.local.json
+*.local
+*.local.sh

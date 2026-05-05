@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+# Configure for Salesforce Bedrock gateway (example - set your own URL)
+# Uncomment and configure these for your Bedrock gateway:
+# export CLAUDE_CODE_USE_BEDROCK=1
+# export CLAUDE_CODE_SKIP_BEDROCK_AUTH=1
+# export ANTHROPIC_BEDROCK_BASE_URL=https://your-gateway-url/bedrock
+
+# Force recovery CLI (simple readline REPL, no Ink TUI)
+if [[ "${CLAUDE_CODE_FORCE_RECOVERY_CLI:-0}" == "1" ]]; then
+  exec bun --env-file=.env ./src/localRecoveryCli.ts "$@"
+fi
+
+# Default: full CLI with Ink TUI
+exec bun --env-file=.env ./src/entrypoints/cli.tsx "$@"
