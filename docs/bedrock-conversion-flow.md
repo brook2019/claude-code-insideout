@@ -10,40 +10,26 @@
 
 ## Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        Claude Code Client                           │
-│  Uses: @anthropic-ai/bedrock-sdk (AnthropicBedrock class)          │
-└───────────────────────┬─────────────────────────────────────────────┘
-                        │
-                        ↓
-        ┌───────────────────────────────┐
-        │   Which endpoint to use?      │
-        └───────────┬───────────────────┘
-                    │
-        ┌───────────┴────────────┐
-        │                        │
-        ↓                        ↓
-┌──────────────────┐    ┌──────────────────────┐
-│  Direct Anthropic│    │  AWS Bedrock Path    │
-│  (Standard)      │    │  (Salesforce uses)   │
-└──────────────────┘    └──────────────────────┘
-        │                        │
-        ↓                        ↓
-  api.anthropic.com     AWS Bedrock Runtime API
-  /v1/messages          /model/us.anthropic.*/invoke
-        │                        │
-        ↓                        ↓
-  ┌─────────────┐         ┌──────────────┐
-  │   Claude    │         │ AWS Bedrock  │
-  │   Model     │         │   Service    │
-  └─────────────┘         └──────┬───────┘
-                                 │
-                                 ↓
-                          ┌──────────────┐
-                          │   Claude     │
-                          │   Model      │
-                          └──────────────┘
+```mermaid
+flowchart TD
+    Client["Claude Code Client\nUses: @anthropic-ai/bedrock-sdk\n(AnthropicBedrock class)"]
+    Decision{"Which endpoint to use?"}
+    DirectPath["Direct Anthropic\n(Standard)"]
+    BedrockPath["AWS Bedrock Path\n(Salesforce uses)"]
+    DirectEndpoint["api.anthropic.com\n/v1/messages"]
+    BedrockEndpoint["AWS Bedrock Runtime API\n/model/us.anthropic.*/invoke"]
+    ClaudeModelDirect["Claude Model"]
+    BedrockService["AWS Bedrock Service"]
+    ClaudeModelBedrock["Claude Model"]
+
+    Client --> Decision
+    Decision --> DirectPath
+    Decision --> BedrockPath
+    DirectPath --> DirectEndpoint
+    BedrockPath --> BedrockEndpoint
+    DirectEndpoint --> ClaudeModelDirect
+    BedrockEndpoint --> BedrockService
+    BedrockService --> ClaudeModelBedrock
 ```
 
 ---
@@ -194,42 +180,18 @@ const response = await client.messages.create({
 
 ## Salesforce Gateway Architecture
 
-```
-┌───────────────────────┐
-│  Claude Code Client   │
-│  (AnthropicBedrock)   │
-└───────────┬───────────┘
-            │ Anthropic format
-            │ POST /bedrock/model/us.anthropic.*/invoke
-            │ x-api-key: sk-xxx...
-            ↓
-┌─────────────────────────────────────────────────┐
-│  Salesforce Gateway                             │
-│  https://eng-ai-model-gateway.sfproxy...        │
-│                                                 │
-│  1. Validates x-api-key (Salesforce token)     │
-│  2. Converts to AWS IAM credentials            │
-│  3. Forwards to real AWS Bedrock               │
-└───────────┬─────────────────────────────────────┘
-            │ AWS IAM signature
-            │ POST /model/us.anthropic.*/invoke
-            ↓
-┌───────────────────────────────────────────────┐
-│  AWS Bedrock Runtime API                      │
-│  https://bedrock-runtime.us-east-1.amazonaws  │
-│                                               │
-│  1. Validates AWS credentials                 │
-│  2. Routes to Claude model                    │
-└───────────┬───────────────────────────────────┘
-            │ Bedrock format
-            ↓
-┌───────────────────────┐
-│  Claude Model         │
-│  (Anthropic's LLM)    │
-└───────────┬───────────┘
-            │ Response
-            ↓
-    (flows back up the chain)
+```mermaid
+flowchart TD
+    Client["Claude Code Client\n(AnthropicBedrock)"]
+    Gateway["Salesforce Gateway\nhttps://eng-ai-model-gateway.sfproxy...\n\n1. Validates x-api-key (Salesforce token)\n2. Converts to AWS IAM credentials\n3. Forwards to real AWS Bedrock"]
+    Bedrock["AWS Bedrock Runtime API\nhttps://bedrock-runtime.us-east-1.amazonaws\n\n1. Validates AWS credentials\n2. Routes to Claude model"]
+    Claude["Claude Model\n(Anthropic's LLM)"]
+    Response["(flows back up the chain)"]
+
+    Client -- "Anthropic format\nPOST /bedrock/model/us.anthropic.*/invoke\nx-api-key: sk-xxx..." --> Gateway
+    Gateway -- "AWS IAM signature\nPOST /model/us.anthropic.*/invoke" --> Bedrock
+    Bedrock -- "Bedrock format" --> Claude
+    Claude -- "Response" --> Response
 ```
 
 ---

@@ -8,49 +8,43 @@ A web-based monitoring dashboard for visualizing Claude Code query execution in 
 
 ## Architecture Components
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                  Claude Code Client (Main Process)          │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │  Query Execution (src/query.ts)                        │ │
-│  │  API Client (src/services/api/claude.ts)              │ │
-│  │  Tool Execution (src/tools/*)                         │ │
-│  └──────────────┬─────────────────────────────────────────┘ │
-│                 │ Emit metrics events                        │
-│                 ↓                                             │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │  Metrics Collector (src/services/dashboard/metrics.ts)│ │
-│  │  - Aggregates metrics                                  │ │
-│  │  - Stores time-series data                            │ │
-│  │  - Broadcasts to WebSocket clients                    │ │
-│  └──────────────┬─────────────────────────────────────────┘ │
-└─────────────────┼─────────────────────────────────────────────┘
-                  │
-                  │ WebSocket broadcasts
-                  ↓
-┌─────────────────────────────────────────────────────────────┐
-│         Web Server (src/services/dashboard/server.ts)       │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │  Express/Fastify Server                                │ │
-│  │  - Serves static HTML/JS                               │ │
-│  │  - WebSocket endpoint for real-time updates           │ │
-│  │  - REST API for historical data                       │ │
-│  └─────────────────────────────────────────────────────────┘ │
-└─────────────────┼─────────────────────────────────────────────┘
-                  │
-                  │ HTTP + WebSocket
-                  ↓
-┌─────────────────────────────────────────────────────────────┐
-│              Dashboard UI (dashboard/ui/)                   │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │  React App with Charts                                 │ │
-│  │  - Real-time query timeline                            │ │
-│  │  - Token usage graphs                                  │ │
-│  │  - API latency metrics                                 │ │
-│  │  - Tool execution stats                                │ │
-│  │  - Cache performance                                   │ │
-│  └─────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Client["Claude Code Client (Main Process)"]
+        subgraph Execution["Query Execution"]
+            QE["Query Execution (src/query.ts)"]
+            API["API Client (src/services/api/claude.ts)"]
+            Tools["Tool Execution (src/tools/*)"]
+        end
+        Execution -- "Emit metrics events" --> Metrics
+        subgraph Metrics["Metrics Collector (src/services/dashboard/metrics.ts)"]
+            M1["Aggregates metrics"]
+            M2["Stores time-series data"]
+            M3["Broadcasts to WebSocket clients"]
+        end
+    end
+
+    Client -- "WebSocket broadcasts" --> Server
+
+    subgraph Server["Web Server (src/services/dashboard/server.ts)"]
+        subgraph Express["Express/Fastify Server"]
+            S1["Serves static HTML/JS"]
+            S2["WebSocket endpoint for real-time updates"]
+            S3["REST API for historical data"]
+        end
+    end
+
+    Server -- "HTTP + WebSocket" --> UI
+
+    subgraph UI["Dashboard UI (dashboard/ui/)"]
+        subgraph React["React App with Charts"]
+            U1["Real-time query timeline"]
+            U2["Token usage graphs"]
+            U3["API latency metrics"]
+            U4["Tool execution stats"]
+            U5["Cache performance"]
+        end
+    end
 ```
 
 ---

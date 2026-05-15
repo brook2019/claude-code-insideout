@@ -18,43 +18,29 @@ Deep dive into how Claude Code implements the **Model Context Protocol (MCP)** �
 
 ## Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Claude Code Client                       │
-│                                                             │
-│  ┌──────────────────────┐   ┌────────────────────────────┐  │
-│  │  MCPConnectionManager │   │    useManageMCPConnections  │  │
-│  │  (React Context)      │   │    (React Hook)             │  │
-│  │  - reconnect          │──▶│    - init pending servers   │  │
-│  │  - toggle enable      │   │    - batch connect          │  │
-│  └──────────────────────┘   │    - notification handlers  │  │
-│                              │    - auto-reconnect logic   │  │
-│                              └──────────┬─────────────────┘  │
-│                                         │                    │
-│                              ┌──────────▼─────────────────┐  │
-│                              │       client.ts             │  │
-│                              │  - connectToServer()        │  │
-│                              │  - fetchToolsForClient()    │  │
-│                              │  - fetchResourcesForClient()│  │
-│                              │  - fetchCommandsForClient() │  │
-│                              │  - getMcpToolsAndResources() │  │
-│                              └──────────┬─────────────────┘  │
-│                                         │                    │
-│          ┌──────────────────────────────┼─────────────┐      │
-│          │              Transport Layer │             │      │
-│          ▼              ▼              ▼             ▼      │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│   │  stdio   │  │   SSE    │  │   HTTP   │  │WebSocket │  │
-│   │Transport │  │Transport │  │Streamable│  │Transport │  │
-│   └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘  │
-│        │             │             │             │          │
-└────────┼─────────────┼─────────────┼─────────────┼──────────┘
-         │             │             │             │
-    ┌────▼────┐   ┌────▼────┐  ┌────▼────┐  ┌────▼────┐
-    │Local MCP│   │Remote   │  │Remote   │  │IDE MCP  │
-    │Server   │   │MCP      │  │MCP      │  │Server   │
-    │(process)│   │Server   │  │Server   │  │(VS Code)│
-    └─────────┘   └─────────┘  └─────────┘  └─────────┘
+```mermaid
+flowchart TD
+    subgraph Client["Claude Code Client"]
+        MCM["MCPConnectionManager\n(React Context)\n- reconnect\n- toggle enable"]
+        UMC["useManageMCPConnections\n(React Hook)\n- init pending servers\n- batch connect\n- notification handlers\n- auto-reconnect logic"]
+        CTS["client.ts\n- connectToServer()\n- fetchToolsForClient()\n- fetchResourcesForClient()\n- fetchCommandsForClient()\n- getMcpToolsAndResources()"]
+        subgraph TL["Transport Layer"]
+            T1["stdio\nTransport"]
+            T2["SSE\nTransport"]
+            T3["HTTP\nStreamable"]
+            T4["WebSocket\nTransport"]
+        end
+        MCM -->|delegates| UMC
+        UMC --> CTS
+        CTS --> T1
+        CTS --> T2
+        CTS --> T3
+        CTS --> T4
+    end
+    T1 --> S1["Local MCP\nServer\n(process)"]
+    T2 --> S2["Remote\nMCP\nServer"]
+    T3 --> S3["Remote\nMCP\nServer"]
+    T4 --> S4["IDE MCP\nServer\n(VS Code)"]
 ```
 
 The MCP subsystem lives primarily in `src/services/mcp/`. The key players:
@@ -79,31 +65,12 @@ When Claude Code starts, `useManageMCPConnections` runs two `useEffect` hooks:
 1. **Initialize servers as pending** — reads all MCP configs and sets each server to `pending` state in AppState
 2. **Two-phase connect** — loads Claude Code configs first (fast), then claude.ai configs (may require network)
 
-```
-Session Start
-    │
-    ▼
-┌─────────────────────────┐
-│ getClaudeCodeMcpConfigs()│  ◀── Reads from:
-│                          │      - .mcp.json (project)
-│                          │      - ~/.claude/settings.json (user)  
-│                          │      - enterprise config
-│                          │      - plugin MCP servers
-└────────────┬────────────┘
-             │
-             ▼
-┌─────────────────────────┐
-│ Set all servers to       │
-│ 'pending' in AppState    │
-└────────────┬────────────┘
-             │
-             ├───────────────────────────┐
-             ▼                           ▼
-┌─────────────────────┐     ┌─────────────────────┐
-│ Phase 1: Connect     │     │ Phase 2: claude.ai   │
-│ Claude Code servers  │     │ proxy configs (async) │
-│ (parallel batches)   │     │ (deduplicated)        │
-└─────────────────────┘     └─────────────────────┘
+```mermaid
+flowchart TD
+    A["Session Start"] --> B["getClaudeCodeMcpConfigs()"]
+    B -- "Reads from:\n- .mcp.json (project)\n- ~/.claude/settings.json (user)\n- enterprise config\n- plugin MCP servers" --> C["Set all servers to\n'pending' in AppState"]
+    C --> D["Phase 1: Connect\nClaude Code servers\n(parallel batches)"]
+    C --> E["Phase 2: claude.ai\nproxy configs (async)\n(deduplicated)"]
 ```
 
 **Log trace** (from `debug.log`):
@@ -130,29 +97,13 @@ Session Start
 
 The actual MCP handshake happens inside `client.connect(transport)`:
 
-```
-Client                              Server
-  │                                    │
-  │──── initialize ───────────────────▶│
-  │     {protocolVersion, capabilities,│
-  │      clientInfo: {                 │
-  │        name: "claude-code",        │
-  │        version: "999.0.0-local"    │
-  │      }}                            │
-  │                                    │
-  │◀─── initialize result ────────────│
-  │     {protocolVersion,              │
-  │      capabilities: {               │
-  │        tools: {listChanged: true}, │
-  │        prompts: {...},             │
-  │        resources: {subscribe:...}, │
-  │      },                            │
-  │      serverInfo: {name, version},  │
-  │      instructions: "..."}          │
-  │                                    │
-  │──── initialized ──────────────────▶│
-  │     (notification, no response)    │
-  │                                    │
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Server
+    Client->>Server: initialize<br/>{protocolVersion, capabilities,<br/>clientInfo: {name: "claude-code",<br/>version: "999.0.0-local"}}
+    Server-->>Client: initialize result<br/>{protocolVersion,<br/>capabilities: {tools: {listChanged: true},<br/>prompts: {...}, resources: {subscribe:...}},<br/>serverInfo: {name, version},<br/>instructions: "..."}
+    Client-)Server: initialized (notification, no response)
 ```
 
 **Client capabilities declared** (from `client.ts:985-1001`):
@@ -193,21 +144,16 @@ After successful `connect()`, Claude Code:
 
 Each MCP server connection is tracked as one of five states:
 
-```
-                    ┌──────────┐
-        ┌──────────│ disabled  │◀── User toggled off
-        │          └──────────┘
-        │
-        ▼
-  ┌──────────┐     ┌──────────┐     ┌──────────┐
-  │ pending  │────▶│connected │────▶│  failed  │
-  │          │     │          │     │          │
-  └──────────┘     └──────────┘     └──────────┘
-        │                │                │
-        │                │                │
-        │          ┌──────────┐           │
-        └─────────▶│needs-auth│◀──────────┘
-                   └──────────┘
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> connected
+    pending --> needs_auth : OAuth required
+    pending --> disabled : User toggled off
+    connected --> failed
+    connected --> needs_auth : OAuth required
+    failed --> needs_auth : OAuth required
+    state "needs-auth" as needs_auth
 ```
 
 - **pending** — config loaded, connection in progress (may show `reconnectAttempt`)
@@ -352,21 +298,16 @@ Or, when delta mode is enabled (`isDeferredToolsDeltaEnabled()`), new tools are 
 
 When the LLM needs a deferred tool, it calls `ToolSearchTool`:
 
-```
-LLM: "I need to use the browser navigation tool"
-  │
-  ▼
-ToolSearchTool.call({ query: "select:mcp__plugin_browser_browser__browser_navigate" })
-  │
-  ▼
-Returns tool_reference blocks:
-  { type: "tool_reference", tool_name: "mcp__plugin_browser_browser__browser_navigate" }
-  │
-  ▼
-API expands tool_reference → full tool schema injected into context
-  │
-  ▼
-LLM can now call mcp__plugin_browser_browser__browser_navigate with correct parameters
+```mermaid
+sequenceDiagram
+    participant LLM
+    participant ToolSearchTool
+    participant API
+    LLM->>ToolSearchTool: call({ query: "select:mcp__...browser_navigate" })
+    ToolSearchTool-->>LLM: tool_reference block<br/>{type: "tool_reference",<br/>tool_name: "mcp__...browser_navigate"}
+    LLM->>API: tool_reference sent to API
+    API-->>LLM: Full tool schema injected into context
+    Note over LLM: LLM can now call<br/>mcp__...browser_navigate<br/>with correct parameters
 ```
 
 ### Three Query Modes
@@ -434,30 +375,14 @@ Both tools have `shouldDefer: true` — they're loaded on-demand via ToolSearch 
 
 MCP prompts become slash commands in Claude Code. Resolution flow:
 
-```
-User types: /mcp__myserver__analyze code
-                │
-                ▼
-  Command lookup by name: "mcp__myserver__analyze"
-                │
-                ▼
-  getPromptForCommand("code")
-                │
-                ▼
-  ensureConnectedClient(client)  // Reconnect if needed
-                │
-                ▼
-  client.getPrompt({
-    name: "analyze",
-    arguments: { arg1: "code" }  // zipObject(argNames, argsArray)
-  })
-                │
-                ▼
-  Server returns: { messages: [{ role: "user", content: {...} }] }
-                │
-                ▼
-  transformResultContent() → ContentBlockParam[]
-  (text → text blocks, images → base64 blocks, resource links → read & inline)
+```mermaid
+flowchart TD
+    A["User types: /mcp__myserver__analyze code"] --> B["Command lookup by name:\nmcp__myserver__analyze"]
+    B --> C["getPromptForCommand('code')"]
+    C --> D["ensureConnectedClient(client)\n(Reconnect if needed)"]
+    D --> E["client.getPrompt({\n  name: 'analyze',\n  arguments: { arg1: 'code' }\n})"]
+    E --> F["Server returns:\n{ messages: [{ role: 'user', content: {...} }] }"]
+    F --> G["transformResultContent() → ContentBlockParam[]\n(text → text blocks, images → base64 blocks,\nresource links → read & inline)"]
 ```
 
 ### Resource Links in Tool Results

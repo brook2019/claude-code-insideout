@@ -12,33 +12,23 @@
 
 ## Communication Flow
 
-```
-┌─────────────────┐
-│  Claude Client  │
-└────────┬────────┘
-         │ HTTP POST /v1/messages
-         │ Content-Type: application/json
-         │ Stream: true
-         ↓
-┌─────────────────┐
-│  API Gateway    │ (Salesforce proxy or Anthropic direct)
-└────────┬────────┘
-         │ Forwards request
-         ↓
-┌─────────────────┐
-│  Claude LLM     │
-└────────┬────────┘
-         │ HTTP 200 OK
-         │ Content-Type: text/event-stream
-         │ Transfer-Encoding: chunked
-         ↓
-   SSE Events Stream:
-   - message_start
-   - content_block_start
-   - content_block_delta (multiple)
-   - content_block_stop
-   - message_delta
-   - message_stop
+```mermaid
+sequenceDiagram
+    participant Client as Claude Client
+    participant Gateway as API Gateway<br/>(Salesforce proxy or Anthropic direct)
+    participant LLM as Claude LLM
+
+    Client->>Gateway: HTTP POST /v1/messages<br/>Content-Type: application/json<br/>Stream: true
+    Gateway->>LLM: Forwards request
+    LLM-->>Client: HTTP 200 OK<br/>Content-Type: text/event-stream<br/>Transfer-Encoding: chunked
+
+    Note over LLM,Client: SSE Events Stream
+    LLM-->>Client: message_start
+    LLM-->>Client: content_block_start
+    LLM-->>Client: content_block_delta (multiple)
+    LLM-->>Client: content_block_stop
+    LLM-->>Client: message_delta
+    LLM-->>Client: message_stop
 ```
 
 ---
