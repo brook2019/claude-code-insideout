@@ -615,6 +615,13 @@ export function useManageMCPConnections(
 
           // Register notification handlers for list_changed notifications
           // These allow the server to notify us when tools, prompts, or resources change
+          // [TRACE] Log which notification handlers are being registered
+          logForDebugging(
+            `[TRACE] [MCP:${client.name}] Registering notification handlers: ` +
+            `tools.listChanged=${!!client.capabilities?.tools?.listChanged}, ` +
+            `prompts.listChanged=${!!client.capabilities?.prompts?.listChanged}, ` +
+            `resources.listChanged=${!!client.capabilities?.resources?.listChanged}`,
+          )
           if (client.capabilities?.tools?.listChanged) {
             client.client.setNotificationHandler(
               ToolListChangedNotificationSchema,

@@ -75,6 +75,8 @@ The enhanced logging reveals the complete request lifecycle. Here's what you'll 
 
 **🔍 [Log Extraction Guide](docs/log-extraction-guide.md)** - Complete guide to extracting LLM requests/responses, prompts, context, and token usage from debug logs.
 
+**🔌 [MCP Protocol Internals](docs/mcp-protocol-internals.md)** - Deep dive into the MCP handshake, tool discovery, deferred tool loading, and resource/prompt resolution.
+
 ## 📡 Real-time Monitoring Dashboard
 
 Type `/dashboard` inside the session to launch a live web dashboard at `http://localhost:8765`:

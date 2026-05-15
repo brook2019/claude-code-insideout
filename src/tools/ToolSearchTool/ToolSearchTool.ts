@@ -331,6 +331,11 @@ export const ToolSearchTool = buildTool({
     const deferredTools = tools.filter(isDeferredTool)
     maybeInvalidateCache(deferredTools)
 
+    // [TRACE] Log deferred tool search request
+    logForDebugging(
+      `[TRACE] [ToolSearch] On-demand tool load requested - query="${query}", maxResults=${max_results}, deferredToolCount=${deferredTools.length}, totalToolCount=${tools.length}`,
+    )
+
     // Check for MCP servers still connecting
     function getPendingServerNames(): string[] | undefined {
       const appState = getAppState()
@@ -402,6 +407,10 @@ export const ToolSearchTool = buildTool({
         logForDebugging(`ToolSearchTool: selected ${found.join(', ')}`)
       }
       logSearchOutcome(found, 'select')
+      // [TRACE] Log deferred tool select result → these tools will be loaded into LLM context
+      logForDebugging(
+        `[TRACE] [ToolSearch] Deferred tools loaded via select: [${found.join(', ')}] → API will expand tool_reference blocks into full schemas`,
+      )
       return buildSearchResult(found, query, deferredTools.length)
     }
 
@@ -415,6 +424,11 @@ export const ToolSearchTool = buildTool({
 
     logForDebugging(
       `ToolSearchTool: keyword search for "${query}", found ${matches.length} matches`,
+    )
+    // [TRACE] Log deferred tool keyword search results
+    logForDebugging(
+      `[TRACE] [ToolSearch] Keyword search results for "${query}": [${matches.join(', ')}]` +
+      (matches.length > 0 ? ' → API will expand tool_reference blocks into full schemas' : ' → no matches'),
     )
 
     logSearchOutcome(matches, 'keyword')

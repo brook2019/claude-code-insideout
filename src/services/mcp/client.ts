@@ -982,6 +982,15 @@ export const connectToServer = memoize(
         }
       }
 
+      // [TRACE] MCP handshake: creating Client with declared capabilities
+      logForDebugging(
+        `[TRACE] [MCP:${name}] Creating MCP Client - clientInfo: ${jsonStringify({
+          name: 'claude-code',
+          version: MACRO.VERSION ?? 'unknown',
+          capabilities: { roots: true, elicitation: true },
+        })}`,
+      )
+
       const client = new Client(
         {
           name: 'claude-code',
@@ -1169,6 +1178,20 @@ export const connectToServer = memoize(
           `Server instructions truncated from ${rawInstructions.length} to ${MAX_MCP_DESCRIPTION_LENGTH} chars`,
         )
       }
+
+      // [TRACE] MCP handshake complete - log full server response details
+      logForDebugging(
+        `[TRACE] [MCP:${name}] Handshake complete - initialize result:\n` +
+        `  protocolVersion: ${client.getServerVersion()?.version ?? 'unknown'}\n` +
+        `  serverInfo: ${jsonStringify(serverVersion || {})}\n` +
+        `  capabilities: ${jsonStringify(capabilities || {})}\n` +
+        `  tools.listChanged: ${!!capabilities?.tools?.listChanged}\n` +
+        `  prompts.listChanged: ${!!capabilities?.prompts?.listChanged}\n` +
+        `  resources.listChanged: ${!!capabilities?.resources?.listChanged}\n` +
+        `  resources.subscribe: ${!!capabilities?.resources?.subscribe}\n` +
+        `  instructionsLength: ${rawInstructions?.length ?? 0}\n` +
+        `  instructions: ${rawInstructions ? rawInstructions.slice(0, 200) + (rawInstructions.length > 200 ? '...' : '') : '(none)'}`,
+      )
 
       // Log successful connection details
       logMCPDebug(
@@ -1746,16 +1769,38 @@ export const fetchToolsForClient = memoizeWithLRU(
 
     try {
       if (!client.capabilities?.tools) {
+        logForDebugging(
+          `[TRACE] [MCP:${client.name}] Tool discovery skipped - server does not declare tools capability`,
+        )
         return []
       }
+
+      logForDebugging(
+        `[TRACE] [MCP:${client.name}] Tool discovery: sending tools/list request...`,
+      )
+      const fetchStart = Date.now()
 
       const result = (await client.client.request(
         { method: 'tools/list' },
         ListToolsResultSchema,
       )) as ListToolsResult
 
+      const fetchElapsed = Date.now() - fetchStart
+
       // Sanitize tool data from MCP server
       const toolsToProcess = recursivelySanitizeUnicode(result.tools)
+
+      // [TRACE] Log tool discovery results
+      logForDebugging(
+        `[TRACE] [MCP:${client.name}] Tool discovery complete in ${fetchElapsed}ms - found ${toolsToProcess.length} tools:\n` +
+        toolsToProcess.map((t, i) => {
+          const hasSearchHint = typeof t._meta?.['anthropic/searchHint'] === 'string'
+          const alwaysLoad = t._meta?.['anthropic/alwaysLoad'] === true
+          const readOnly = t.annotations?.readOnlyHint ?? false
+          const destructive = t.annotations?.destructiveHint ?? false
+          return `  [${i + 1}] ${t.name} (readOnly=${readOnly}, destructive=${destructive}, alwaysLoad=${alwaysLoad}, hasSearchHint=${hasSearchHint}, descLen=${(t.description ?? '').length}, inputSchemaKeys=${Object.keys(t.inputSchema?.properties ?? {}).join(',')})`
+        }).join('\n'),
+      )
 
       // Check if we should skip the mcp__ prefix for SDK MCP servers
       const skipPrefix =
@@ -2003,15 +2048,38 @@ export const fetchResourcesForClient = memoizeWithLRU(
 
     try {
       if (!client.capabilities?.resources) {
+        logForDebugging(
+          `[TRACE] [MCP:${client.name}] Resource discovery skipped - server does not declare resources capability`,
+        )
         return []
       }
+
+      logForDebugging(
+        `[TRACE] [MCP:${client.name}] Resource discovery: sending resources/list request...`,
+      )
+      const fetchStart = Date.now()
 
       const result = await client.client.request(
         { method: 'resources/list' },
         ListResourcesResultSchema,
       )
 
-      if (!result.resources) return []
+      const fetchElapsed = Date.now() - fetchStart
+
+      if (!result.resources) {
+        logForDebugging(
+          `[TRACE] [MCP:${client.name}] Resource discovery complete in ${fetchElapsed}ms - no resources returned`,
+        )
+        return []
+      }
+
+      // [TRACE] Log resource discovery results
+      logForDebugging(
+        `[TRACE] [MCP:${client.name}] Resource discovery complete in ${fetchElapsed}ms - found ${result.resources.length} resources:\n` +
+        result.resources.map((r, i) =>
+          `  [${i + 1}] ${r.uri} (name=${r.name ?? '?'}, mimeType=${r.mimeType ?? '?'})`,
+        ).join('\n'),
+      )
 
       // Add server name to each resource
       return result.resources.map(resource => ({
@@ -2036,8 +2104,16 @@ export const fetchCommandsForClient = memoizeWithLRU(
 
     try {
       if (!client.capabilities?.prompts) {
+        logForDebugging(
+          `[TRACE] [MCP:${client.name}] Prompt/command discovery skipped - server does not declare prompts capability`,
+        )
         return []
       }
+
+      logForDebugging(
+        `[TRACE] [MCP:${client.name}] Prompt/command discovery: sending prompts/list request...`,
+      )
+      const fetchStart = Date.now()
 
       // Request prompts list from client
       const result = (await client.client.request(
@@ -2045,7 +2121,23 @@ export const fetchCommandsForClient = memoizeWithLRU(
         ListPromptsResultSchema,
       )) as ListPromptsResult
 
-      if (!result.prompts) return []
+      const fetchElapsed = Date.now() - fetchStart
+
+      if (!result.prompts) {
+        logForDebugging(
+          `[TRACE] [MCP:${client.name}] Prompt/command discovery complete in ${fetchElapsed}ms - no prompts returned`,
+        )
+        return []
+      }
+
+      // [TRACE] Log prompt discovery results
+      logForDebugging(
+        `[TRACE] [MCP:${client.name}] Prompt/command discovery complete in ${fetchElapsed}ms - found ${result.prompts.length} prompts:\n` +
+        result.prompts.map((p, i) => {
+          const argNames = Object.values(p.arguments ?? {}).map(k => k.name)
+          return `  [${i + 1}] ${p.name} (args=${argNames.join(',') || 'none'}, desc=${(p.description ?? '').slice(0, 80)})`
+        }).join('\n'),
+      )
 
       // Sanitize prompt data from MCP server
       const promptsToProcess = recursivelySanitizeUnicode(result.prompts)
@@ -2234,6 +2326,12 @@ export async function getMcpToolsCommandsAndResources(
 ): Promise<void> {
   let resourceToolsAdded = false
 
+  // [TRACE] Log the start of MCP server connection orchestration
+  logForDebugging(
+    `[TRACE] [MCP] getMcpToolsCommandsAndResources starting - connecting to ${mcpConfigs ? Object.keys(mcpConfigs).length : '(loading...)'} configured servers`,
+  )
+  const orchestrationStart = Date.now()
+
   const allConfigEntries = Object.entries(
     mcpConfigs ?? (await getAllMcpConfigs()).servers,
   )
@@ -2385,6 +2483,14 @@ export async function getMcpToolsCommandsAndResources(
     }
   }
 
+  // [TRACE] Log batch configuration
+  logForDebugging(
+    `[TRACE] [MCP] Connecting ${localServers.length} local (concurrency=${getMcpServerConnectionBatchSize()}) + ` +
+    `${remoteServers.length} remote (concurrency=${getRemoteMcpServerConnectionBatchSize()}) servers:\n` +
+    `  Local:  ${localServers.map(([n]) => n).join(', ') || '(none)'}\n` +
+    `  Remote: ${remoteServers.map(([n]) => n).join(', ') || '(none)'}`,
+  )
+
   // Process both groups concurrently, each with their own concurrency limits:
   // - Local servers (stdio/sdk): lower concurrency to avoid process spawning resource contention
   // - Remote servers: higher concurrency since they're just network connections
@@ -2400,6 +2506,13 @@ export async function getMcpToolsCommandsAndResources(
       processServer,
     ),
   ])
+
+  const orchestrationElapsed = Date.now() - orchestrationStart
+  logForDebugging(
+    `[TRACE] [MCP] getMcpToolsCommandsAndResources complete in ${orchestrationElapsed}ms - ` +
+    `processed ${totalServers} servers (${serverStats.stdioCount} stdio, ${serverStats.sseCount} sse, ` +
+    `${serverStats.httpCount} http, ${serverStats.sseIdeCount} sse-ide, ${serverStats.wsIdeCount} ws-ide)`,
+  )
 }
 
 // Not memoized: called only 2-3 times at startup/reconfig. The inner work
