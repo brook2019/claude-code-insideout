@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Launch the Claude Code Monitoring Dashboard
+# Usage: ./bin/dashboard [--port PORT] [--demo]
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+exec bun --env-file=.env ./src/services/dashboard/cli.ts "$@"
