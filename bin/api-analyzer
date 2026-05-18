@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# API Traffic Analyzer
+# Usage: ./bin/api-analyzer analyze [debug-log-path]
+#        ./bin/api-analyzer report [-o docs/server-behavior.md]
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+exec bun run ./src/tools/apiTrafficAnalyzer.ts "$@"
